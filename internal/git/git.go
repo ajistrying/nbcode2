@@ -9,10 +9,13 @@ import (
 
 // Info holds git repository state for display and prompt assembly.
 type Info struct {
-	IsRepo  bool
-	Root    string
-	Branch  string
-	Status  string // short status summary
+	IsRepo    bool
+	Root      string
+	Branch    string
+	Status    string // short status summary (kept for prompt module)
+	Staged    int
+	Modified  int
+	Untracked int
 }
 
 // GetInfo returns git information for the given directory.
@@ -40,18 +43,55 @@ func GetInfo(dir string) Info {
 		}
 	}
 
-	// Get short status
-	status, err := runGit(dir, "status", "--short")
+	// Get short status with per-file detail
+	status, err := runGit(dir, "status", "--porcelain")
 	if err == nil {
 		lines := strings.Split(strings.TrimSpace(status), "\n")
 		if len(lines) == 1 && lines[0] == "" {
 			info.Status = "clean"
 		} else {
+			for _, line := range lines {
+				if len(line) < 2 {
+					continue
+				}
+				x, y := line[0], line[1]
+				if x == '?' {
+					info.Untracked++
+				} else {
+					if x != ' ' && x != '?' {
+						info.Staged++
+					}
+					if y != ' ' && y != '?' {
+						info.Modified++
+					}
+				}
+			}
 			info.Status = pluralize(len(lines), "file changed", "files changed")
 		}
 	}
 
 	return info
+}
+
+// StatusCompact returns a compact git status string like "main +2 ~1 ?3" or "main clean".
+func (i Info) StatusCompact() string {
+	if !i.IsRepo {
+		return ""
+	}
+	s := i.Branch
+	if i.Staged == 0 && i.Modified == 0 && i.Untracked == 0 {
+		return s + " clean"
+	}
+	if i.Staged > 0 {
+		s += fmt.Sprintf(" +%d", i.Staged)
+	}
+	if i.Modified > 0 {
+		s += fmt.Sprintf(" ~%d", i.Modified)
+	}
+	if i.Untracked > 0 {
+		s += fmt.Sprintf(" ?%d", i.Untracked)
+	}
+	return s
 }
 
 // RepoRoot finds the git repo root for nbcode.md lookup.

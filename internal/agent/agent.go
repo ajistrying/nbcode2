@@ -18,6 +18,9 @@ type ConfirmFunc func(toolName string, args json.RawMessage) bool
 // StatusFunc is called to update the TUI with the current action.
 type StatusFunc func(status string)
 
+// ToolCallFunc is called to notify the TUI about a tool invocation.
+type ToolCallFunc func(toolName string, args json.RawMessage)
+
 // Agent orchestrates the tool-use loop between the user, LLM, and tools.
 type Agent struct {
 	provider   provider.Provider
@@ -26,6 +29,7 @@ type Agent struct {
 	permission *permission.Checker
 	onConfirm  ConfirmFunc
 	onStatus   StatusFunc
+	onToolCall ToolCallFunc
 	systemMsg  provider.Message
 }
 
@@ -38,6 +42,7 @@ type Config struct {
 	SystemPrompt string
 	OnConfirm    ConfirmFunc
 	OnStatus     StatusFunc
+	OnToolCall   ToolCallFunc
 }
 
 // New creates a new agent with the given configuration.
@@ -59,6 +64,7 @@ func New(cfg Config) *Agent {
 		permission: cfg.Permission,
 		onConfirm:  cfg.OnConfirm,
 		onStatus:   cfg.OnStatus,
+		onToolCall: cfg.OnToolCall,
 		systemMsg:  systemMsg,
 	}
 
@@ -242,6 +248,9 @@ func (a *Agent) executeTool(tc provider.ToolCall) string {
 		return "Tool execution is not permitted."
 	}
 
+	if a.onToolCall != nil {
+		a.onToolCall(tc.Name, tc.Arguments)
+	}
 	a.setStatus(fmt.Sprintf("Running %s...", tc.Name))
 
 	result, err := tool.Execute(tc.Arguments)

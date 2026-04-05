@@ -83,10 +83,18 @@ func main() {
 				tuiProgram.Send(tui.StatusUpdateMsg(status))
 			}
 		},
+		OnToolCall: func(toolName string, args json.RawMessage) {
+			if tuiProgram != nil {
+				tuiProgram.Send(tui.ToolCallMsg{
+					ToolName: toolName,
+					Args:     args,
+				})
+			}
+		},
 	}
 
 	a := agent.New(agentCfg)
-	model := tui.New(a, llmProvider.Model(), workDir)
+	model := tui.New(a, llmProvider, workDir)
 	tuiProgram = tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := tuiProgram.Run(); err != nil {
