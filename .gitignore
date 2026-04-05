@@ -1,0 +1,26 @@
+# Binary (root only, not cmd/nbcode/ directory)
+/nbcode
+/nbcode.exe
+
+# Go
+*.test
+*.out
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# nbcode local data
+.nbcode/
+
+# GoReleaser
+dist/
+.env
