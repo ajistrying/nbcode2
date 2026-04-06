@@ -128,23 +128,33 @@ Here's what happens when you type a message and press Enter:
 tui.go Update() → tea.KeyEnter → sendMessage(input)
 ```
 
-The TUI captures the Enter key, reads the textarea value, appends it to the chat display, sets `loading = true`, and dispatches a Bubble Tea command that calls `agent.Run(input)` in a goroutine.
+The TUI captures the Enter key, reads the textarea value, appends it to the chat display, sets `loading = true`, and dispatches a Bubble Tea command that calls `agent.RunStream(input)` in a goroutine.
 
 ### Step 2: Agent Receives Message
 
 ```
-agent.go Run() → context.Add(userMessage)
+agent.go RunStream() → context.Add(userMessage)
 ```
 
 The user's text is wrapped in a `Message{Role: RoleUser, Content: input}` and added to the context manager's message history.
 
-### Step 3: LLM Call
+### Step 3: LLM Call (Streaming)
 
 ```
-agent.go → provider.Chat(context.Messages(), tools.Definitions())
+agent.go → provider.ChatStream(context.Messages(), tools.Definitions())
 ```
 
-The agent sends the entire conversation history (all messages in the context manager) plus the tool definitions to the LLM provider.
+The agent sends the entire conversation history plus tool definitions to the LLM provider via `ChatStream()`, which returns a `<-chan StreamEvent`. The agent ranges over this channel, processing events as they arrive:
+
+- **`text_delta`** — Forwarded immediately to the TUI via `OnTextDelta` callback. The TUI accumulates deltas in a buffer and re-renders on a 50ms throttled tick (raw text during streaming, Glamour markdown on completion).
+- **`tool_start`** — Notifies the TUI that a tool call is beginning.
+- **`tool_delta`** — Tool call arguments accumulating (handled by provider internally).
+- **`done`** — Stream complete. Contains final tool calls and usage stats.
+- **`error`** — Stream error, propagated to caller.
+
+The non-streaming `Chat()` method is still available and used by sub-agents and summarization where streaming adds no user-visible value.
+
+**Note:** The `Run()` method (non-streaming) is preserved alongside `RunStream()` for sub-agents and internal use.
 
 **If using OpenAI-compatible provider:**
 - Messages are converted via `toOpenAIMessages()` — a straightforward mapping
@@ -219,11 +229,14 @@ After each LLM response, the agent checks if total tokens have exceeded 80% of t
 tui.go → agentResponseMsg{content: result}
 ```
 
-The agent's final text response arrives back at the TUI via a Bubble Tea message. The TUI:
-1. Sets `loading = false`
-2. Appends the assistant message to the chat display
-3. Re-renders the viewport
-4. Scrolls to the bottom
+During streaming, text deltas arrive at the TUI as `TextDeltaMsg` messages. These are accumulated in a buffer and rendered as raw text on a 50ms tick. When the agent loop finishes, the final `agentResponseMsg` arrives:
+
+1. Sets `loading = false`, clears streaming state
+2. Appends the complete assistant message to the chat display
+3. Renders the full response with Glamour markdown
+4. Re-renders the viewport and scrolls to the bottom
+
+This produces a smooth experience: raw text appears token-by-token during streaming, then "snaps" to formatted markdown on completion.
 
 ## Sub-Agent Execution
 

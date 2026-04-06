@@ -2,6 +2,8 @@ package provider
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -212,5 +214,166 @@ func TestToAnthropicTools(t *testing.T) {
 	}
 	if string(result[0].InputSchema) != `{"type": "object"}` {
 		t.Errorf("expected input schema, got %q", string(result[0].InputSchema))
+	}
+}
+
+// --- Anthropic ChatStream Stub Tests ---
+
+func TestAnthropicChatStreamStubTextOnly(t *testing.T) {
+	// We can't call a real API, but we can test the stub by creating a
+	// provider with a test HTTP server that returns a known response.
+	// For now, test the stream event types and structure.
+	t.Run("StreamEventTypes", func(t *testing.T) {
+		// Verify event type constants are correctly defined
+		if EventTextDelta != "text_delta" {
+			t.Errorf("expected text_delta, got %q", EventTextDelta)
+		}
+		if EventToolStart != "tool_start" {
+			t.Errorf("expected tool_start, got %q", EventToolStart)
+		}
+		if EventToolDelta != "tool_delta" {
+			t.Errorf("expected tool_delta, got %q", EventToolDelta)
+		}
+		if EventDone != "done" {
+			t.Errorf("expected done, got %q", EventDone)
+		}
+		if EventError != "error" {
+			t.Errorf("expected error, got %q", EventError)
+		}
+	})
+
+	t.Run("StreamEventStruct", func(t *testing.T) {
+		// Verify StreamEvent can carry all expected data
+		tc := ToolCall{ID: "t1", Name: "bash", Arguments: json.RawMessage(`{}`)}
+		usage := Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
+
+		textEvent := StreamEvent{Type: EventTextDelta, Delta: "hello"}
+		if textEvent.Delta != "hello" {
+			t.Errorf("expected delta 'hello', got %q", textEvent.Delta)
+		}
+
+		toolStartEvent := StreamEvent{Type: EventToolStart, ToolCall: &tc}
+		if toolStartEvent.ToolCall.Name != "bash" {
+			t.Errorf("expected tool name 'bash', got %q", toolStartEvent.ToolCall.Name)
+		}
+
+		doneEvent := StreamEvent{
+			Type:      EventDone,
+			ToolCalls: []ToolCall{tc},
+			Usage:     &usage,
+		}
+		if len(doneEvent.ToolCalls) != 1 {
+			t.Errorf("expected 1 tool call in done event, got %d", len(doneEvent.ToolCalls))
+		}
+		if doneEvent.Usage.TotalTokens != 30 {
+			t.Errorf("expected 30 total tokens, got %d", doneEvent.Usage.TotalTokens)
+		}
+	})
+}
+
+// TestAnthropicChatStreamStubIntegration tests the Anthropic stub by using
+// a local HTTP test server.
+func TestAnthropicChatStreamStubIntegration(t *testing.T) {
+	// Create a test server that returns a known Anthropic response
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := `{
+			"content": [
+				{"type": "text", "text": "Hello from stub stream!"}
+			],
+			"usage": {"input_tokens": 10, "output_tokens": 5},
+			"stop_reason": "end_turn"
+		}`
+		w.Write([]byte(resp))
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
+
+	p := NewAnthropicProvider(AnthropicConfig{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+		Model:   "test-model",
+	})
+
+	messages := []Message{
+		{Role: RoleUser, Content: "Hello"},
+	}
+
+	ch := p.ChatStream(messages, nil)
+
+	var events []StreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+
+	// Stub should emit: text_delta, done
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d: %+v", len(events), events)
+	}
+
+	if events[0].Type != EventTextDelta {
+		t.Errorf("expected first event to be text_delta, got %q", events[0].Type)
+	}
+	if events[0].Delta != "Hello from stub stream!" {
+		t.Errorf("expected delta text, got %q", events[0].Delta)
+	}
+
+	if events[1].Type != EventDone {
+		t.Errorf("expected last event to be done, got %q", events[1].Type)
+	}
+	if events[1].Usage.TotalTokens != 15 {
+		t.Errorf("expected 15 total tokens, got %d", events[1].Usage.TotalTokens)
+	}
+}
+
+// TestAnthropicChatStreamStubWithToolCalls tests the stub with tool calls.
+func TestAnthropicChatStreamStubWithToolCalls(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := `{
+			"content": [
+				{"type": "text", "text": "Let me check."},
+				{"type": "tool_use", "id": "t1", "name": "bash", "input": {"command": "ls"}}
+			],
+			"usage": {"input_tokens": 20, "output_tokens": 15},
+			"stop_reason": "tool_use"
+		}`
+		w.Write([]byte(resp))
+	}
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	defer server.Close()
+
+	p := NewAnthropicProvider(AnthropicConfig{
+		APIKey:  "test-key",
+		BaseURL: server.URL,
+		Model:   "test-model",
+	})
+
+	ch := p.ChatStream([]Message{{Role: RoleUser, Content: "List files"}}, nil)
+
+	var events []StreamEvent
+	for event := range ch {
+		events = append(events, event)
+	}
+
+	// Stub should emit: text_delta, tool_start, done
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d: %+v", len(events), events)
+	}
+
+	if events[0].Type != EventTextDelta {
+		t.Errorf("expected text_delta, got %q", events[0].Type)
+	}
+	if events[1].Type != EventToolStart {
+		t.Errorf("expected tool_start, got %q", events[1].Type)
+	}
+	if events[1].ToolCall.Name != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", events[1].ToolCall.Name)
+	}
+	if events[2].Type != EventDone {
+		t.Errorf("expected done, got %q", events[2].Type)
+	}
+	if len(events[2].ToolCalls) != 1 {
+		t.Errorf("expected 1 tool call in done event, got %d", len(events[2].ToolCalls))
 	}
 }

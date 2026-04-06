@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -97,6 +98,12 @@ type ConfirmRequestMsg struct {
 	Respond  chan bool
 }
 
+// TextDeltaMsg delivers a streaming text delta from the agent.
+type TextDeltaMsg string
+
+// streamTickMsg is an internal tick for throttled stream rendering.
+type streamTickMsg time.Time
+
 // ─── Model ──────────────────────────────────────────────────────────────────
 
 // Model is the Bubble Tea model for the nbcode TUI.
@@ -119,6 +126,11 @@ type Model struct {
 	confirmChan   chan bool
 	ready         bool
 	lastWrapWidth int
+
+	// Streaming state
+	streaming    bool   // true while text deltas are arriving
+	streamBuf    string // accumulated raw text from deltas (rendered on tick)
+	streamDirty  bool   // true if new deltas arrived since last render tick
 }
 
 type chatMessage struct {
@@ -232,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentResponseMsg:
 		m.loading = false
+		m.streaming = false
+		m.streamBuf = ""
+		m.streamDirty = false
 		if msg.err != nil {
 			m.messages = append(m.messages, chatMessage{
 				role:    "error",
@@ -248,6 +263,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ToolCallMsg:
+		// If we were streaming text before this tool call, flush the buffer
+		if m.streaming && m.streamBuf != "" {
+			m.messages = append(m.messages, chatMessage{
+				role:    "assistant",
+				content: m.streamBuf,
+			})
+			m.streamBuf = ""
+			m.streaming = false
+			m.streamDirty = false
+		}
 		m.messages = append(m.messages, chatMessage{
 			role:    "tool",
 			content: formatToolCall(msg.ToolName, msg.Args),
@@ -259,6 +284,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StatusUpdateMsg:
 		m.status = string(msg)
 		return m, nil
+
+	case TextDeltaMsg:
+		delta := string(msg)
+		m.streamBuf += delta
+		m.streamDirty = true
+		if !m.streaming {
+			// First delta — start streaming mode and kick off render tick
+			m.streaming = true
+			return m, m.streamTick()
+		}
+		return m, nil
+
+	case streamTickMsg:
+		if !m.streaming {
+			return m, nil
+		}
+		if m.streamDirty {
+			m.streamDirty = false
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+		}
+		// Schedule next tick
+		return m, m.streamTick()
 
 	case ConfirmRequestMsg:
 		m.confirming = true
@@ -444,6 +492,13 @@ func (m Model) renderMessages() string {
 			sb.WriteString(lipgloss.NewStyle().Foreground(theme.muted).Italic(true).Render(msg.content) + "\n\n")
 		}
 	}
+
+	// If streaming, append the in-progress raw text (no Glamour — rendered on completion)
+	if m.streaming && m.streamBuf != "" {
+		sb.WriteString(userLabelStyle.Render("nbcode") + "\n")
+		sb.WriteString(m.streamBuf + "\n\n")
+	}
+
 	return sb.String()
 }
 
@@ -459,9 +514,16 @@ func (m Model) renderWelcome() string {
 
 // ─── Commands & Helpers ─────────────────────────────────────────────────────
 
+// streamTick returns a command that fires a streamTickMsg after 50ms.
+func (m Model) streamTick() tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+		return streamTickMsg(t)
+	})
+}
+
 func (m Model) sendMessage(input string) tea.Cmd {
 	return func() tea.Msg {
-		response, err := m.agent.Run(input)
+		response, err := m.agent.RunStream(input)
 		return agentResponseMsg{content: response, err: err}
 	}
 }

@@ -1,6 +1,29 @@
 package provider
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
+
+// StreamEventType identifies the kind of streaming event.
+type StreamEventType string
+
+const (
+	EventTextDelta StreamEventType = "text_delta"
+	EventToolStart StreamEventType = "tool_start"
+	EventToolDelta StreamEventType = "tool_delta"
+	EventDone      StreamEventType = "done"
+	EventError     StreamEventType = "error"
+)
+
+// StreamEvent represents a single event from a streaming chat completion.
+type StreamEvent struct {
+	Type      StreamEventType // what kind of event this is
+	Delta     string          // text content or argument fragment
+	ToolCall  *ToolCall       // populated on EventToolStart (has ID + Name)
+	ToolCalls []ToolCall      // all completed tool calls, populated on EventDone
+	Usage     *Usage          // populated on EventDone
+	Error     error           // populated on EventError
+}
 
 // Role represents a message role in the conversation.
 type Role string
@@ -55,6 +78,12 @@ type Usage struct {
 type Provider interface {
 	// Chat sends a conversation to the model and returns its response.
 	Chat(messages []Message, tools []ToolDefinition) (*Response, error)
+
+	// ChatStream sends a conversation and returns a channel of streaming events.
+	// The channel is closed when the stream is complete.
+	// Providers that don't support native streaming should wrap Chat() in a
+	// single-shot channel (emit text + done events).
+	ChatStream(messages []Message, tools []ToolDefinition) <-chan StreamEvent
 
 	// Name returns the provider's display name (e.g. "anthropic", "openai").
 	Name() string

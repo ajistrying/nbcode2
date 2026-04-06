@@ -21,16 +21,20 @@ type StatusFunc func(status string)
 // ToolCallFunc is called to notify the TUI about a tool invocation.
 type ToolCallFunc func(toolName string, args json.RawMessage)
 
+// TextDeltaFunc is called to stream text deltas to the TUI.
+type TextDeltaFunc func(delta string)
+
 // Agent orchestrates the tool-use loop between the user, LLM, and tools.
 type Agent struct {
-	provider   provider.Provider
-	tools      *tools.Registry
-	context    *agentctx.Manager
-	permission *permission.Checker
-	onConfirm  ConfirmFunc
-	onStatus   StatusFunc
-	onToolCall ToolCallFunc
-	systemMsg  provider.Message
+	provider    provider.Provider
+	tools       *tools.Registry
+	context     *agentctx.Manager
+	permission  *permission.Checker
+	onConfirm   ConfirmFunc
+	onStatus    StatusFunc
+	onToolCall  ToolCallFunc
+	onTextDelta TextDeltaFunc
+	systemMsg   provider.Message
 }
 
 // Config holds dependencies for creating an Agent.
@@ -43,6 +47,7 @@ type Config struct {
 	OnConfirm    ConfirmFunc
 	OnStatus     StatusFunc
 	OnToolCall   ToolCallFunc
+	OnTextDelta  TextDeltaFunc
 }
 
 // New creates a new agent with the given configuration.
@@ -58,14 +63,15 @@ func New(cfg Config) *Agent {
 	ctx.Add(systemMsg)
 
 	a := &Agent{
-		provider:   cfg.Provider,
-		tools:      cfg.Tools,
-		context:    ctx,
-		permission: cfg.Permission,
-		onConfirm:  cfg.OnConfirm,
-		onStatus:   cfg.OnStatus,
-		onToolCall: cfg.OnToolCall,
-		systemMsg:  systemMsg,
+		provider:    cfg.Provider,
+		tools:       cfg.Tools,
+		context:     ctx,
+		permission:  cfg.Permission,
+		onConfirm:   cfg.OnConfirm,
+		onStatus:    cfg.OnStatus,
+		onToolCall:  cfg.OnToolCall,
+		onTextDelta: cfg.OnTextDelta,
+		systemMsg:   systemMsg,
 	}
 
 	// Register the sub-agent tool with a runner that creates a child agent loop
@@ -214,6 +220,94 @@ func (a *Agent) Run(userMessage string) (string, error) {
 
 		// Execute each tool call
 		for _, tc := range resp.ToolCalls {
+			result := a.executeTool(tc)
+			a.context.Add(provider.Message{
+				Role:       provider.RoleTool,
+				Content:    result,
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+			})
+		}
+
+		// Check if we should summarize before the next loop iteration
+		if a.context.ShouldSummarize() {
+			a.setStatus("Summarizing conversation...")
+			a.summarize()
+		}
+	}
+}
+
+// RunStream processes a user message using streaming, forwarding text deltas
+// to the TUI via the OnTextDelta callback. Returns the final assembled response.
+func (a *Agent) RunStream(userMessage string) (string, error) {
+	a.context.Add(provider.Message{
+		Role:    provider.RoleUser,
+		Content: userMessage,
+	})
+
+	for {
+		a.setStatus("Thinking...")
+
+		ch := a.provider.ChatStream(a.context.Messages(), a.tools.Definitions())
+
+		var textContent string
+		var toolCalls []provider.ToolCall
+		var usage provider.Usage
+		var streamErr error
+
+		for event := range ch {
+			switch event.Type {
+			case provider.EventTextDelta:
+				textContent += event.Delta
+				if a.onTextDelta != nil {
+					a.onTextDelta(event.Delta)
+				}
+
+			case provider.EventToolStart:
+				// Notify TUI that a tool call is beginning
+				if event.ToolCall != nil && a.onToolCall != nil {
+					a.onToolCall(event.ToolCall.Name, event.ToolCall.Arguments)
+				}
+
+			case provider.EventToolDelta:
+				// Arguments are accumulated by the provider; nothing to do here
+
+			case provider.EventDone:
+				toolCalls = event.ToolCalls
+				if event.Usage != nil {
+					usage = *event.Usage
+				}
+
+			case provider.EventError:
+				streamErr = event.Error
+			}
+		}
+
+		if streamErr != nil {
+			return "", fmt.Errorf("provider stream error: %w", streamErr)
+		}
+
+		a.context.UpdateUsage(usage)
+
+		// No tool calls — we have a final response
+		if len(toolCalls) == 0 {
+			a.context.Add(provider.Message{
+				Role:    provider.RoleAssistant,
+				Content: textContent,
+			})
+			a.setStatus("")
+			return textContent, nil
+		}
+
+		// Add assistant message with tool calls
+		a.context.Add(provider.Message{
+			Role:      provider.RoleAssistant,
+			Content:   textContent,
+			ToolCalls: toolCalls,
+		})
+
+		// Execute each tool call
+		for _, tc := range toolCalls {
 			result := a.executeTool(tc)
 			a.context.Add(provider.Message{
 				Role:       provider.RoleTool,

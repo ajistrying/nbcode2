@@ -14,16 +14,16 @@ When deciding what to build next, ask:
 
 ### High Value — Build These First
 
-#### Token-by-Token Streaming
-**Current:** The TUI waits for the complete LLM response before displaying.
-**Improvement:** Stream tokens as they arrive using the provider's streaming API.
-**Why deferred:** Streaming adds complexity to both providers (SSE parsing for Anthropic, streaming for OpenAI) and the TUI (incremental viewport updates). The action-aware spinner is an adequate placeholder.
-**How to implement:**
-- Add a `ChatStream(messages, tools) <-chan StreamEvent` method to the `Provider` interface
-- `StreamEvent` can be `{Type: "text"|"tool_call", Delta: string}`
-- OpenAI: use `CreateChatCompletionStream` from go-openai
-- Anthropic: parse Server-Sent Events from `/v1/messages` with `stream: true`
-- TUI: update the viewport on each text delta
+#### ~~Token-by-Token Streaming~~ ✓ Implemented
+**Status:** Completed. Tokens stream to the TUI as they arrive.
+**What was built:**
+- `ChatStream(messages, tools) <-chan StreamEvent` method on the `Provider` interface
+- `StreamEvent` supports `text_delta`, `tool_start`, `tool_delta`, `done`, and `error` event types
+- OpenAI: native streaming via `CreateChatCompletionStream` from go-openai SDK
+- Anthropic: stub implementation wrapping `Chat()` into single-shot channel events (native SSE streaming is a future enhancement)
+- Agent: `RunStream()` method that forwards text deltas via `OnTextDelta` callback
+- TUI: 50ms throttled render tick, raw text during streaming, Glamour markdown on completion
+- `Run()` and `Chat()` preserved for sub-agents and summarization where streaming adds no value
 
 #### Repo Map (Tree-Sitter)
 **Current:** The agent uses `list_files` and `search` to explore codebases.

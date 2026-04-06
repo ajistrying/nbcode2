@@ -30,6 +30,32 @@ func (m *mockProvider) Name() string           { return "mock" }
 func (m *mockProvider) Model() string           { return "mock-model" }
 func (m *mockProvider) MaxContextTokens() int   { return 100000 }
 
+// ChatStream wraps Chat() into a single-shot channel for testing.
+func (m *mockProvider) ChatStream(messages []provider.Message, toolDefs []provider.ToolDefinition) <-chan provider.StreamEvent {
+	ch := make(chan provider.StreamEvent)
+	go func() {
+		defer close(ch)
+		resp, err := m.Chat(messages, toolDefs)
+		if err != nil {
+			ch <- provider.StreamEvent{Type: provider.EventError, Error: err}
+			return
+		}
+		if resp.Content != "" {
+			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Delta: resp.Content}
+		}
+		for _, tc := range resp.ToolCalls {
+			tc := tc
+			ch <- provider.StreamEvent{Type: provider.EventToolStart, ToolCall: &tc}
+		}
+		ch <- provider.StreamEvent{
+			Type:      provider.EventDone,
+			ToolCalls: resp.ToolCalls,
+			Usage:     &resp.Usage,
+		}
+	}()
+	return ch
+}
+
 // TestSimpleResponse verifies the agent returns a text response
 // when the LLM doesn't make any tool calls.
 func TestSimpleResponse(t *testing.T) {
@@ -317,5 +343,147 @@ func TestStatusCallbacks(t *testing.T) {
 	}
 	if !foundRunning {
 		t.Error("expected 'Running bash...' status")
+	}
+}
+
+// ─── RunStream Tests ──────────────────────────────────────────────────────────
+
+// TestRunStreamSimpleResponse verifies RunStream returns a text response
+// and delivers deltas via the callback.
+func TestRunStreamSimpleResponse(t *testing.T) {
+	mock := &mockProvider{
+		responses: []provider.Response{
+			{Content: "Hello from stream!", Usage: provider.Usage{TotalTokens: 100}},
+		},
+	}
+
+	var deltas []string
+	a := New(Config{
+		Provider:     mock,
+		Tools:        tools.NewRegistry(),
+		Context:      agentctx.NewManager(100000, 0.8),
+		Permission:   permission.NewChecker(config.PermissionYolo),
+		SystemPrompt: "You are helpful.",
+		OnTextDelta: func(delta string) {
+			deltas = append(deltas, delta)
+		},
+	})
+
+	result, err := a.RunStream("Hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result != "Hello from stream!" {
+		t.Errorf("expected streaming response, got: %q", result)
+	}
+
+	// The mock emits the full content as a single delta
+	if len(deltas) != 1 || deltas[0] != "Hello from stream!" {
+		t.Errorf("expected one delta with full content, got: %v", deltas)
+	}
+}
+
+// TestRunStreamWithToolCalls verifies RunStream handles the tool-use loop
+// and delivers text deltas from both iterations.
+func TestRunStreamWithToolCalls(t *testing.T) {
+	mock := &mockProvider{
+		responses: []provider.Response{
+			{
+				Content: "Let me run that.",
+				ToolCalls: []provider.ToolCall{
+					{
+						ID:        "call_1",
+						Name:      "bash",
+						Arguments: json.RawMessage(`{"command":"echo streamed"}`),
+					},
+				},
+				Usage: provider.Usage{TotalTokens: 200},
+			},
+			{
+				Content: "The output was: streamed",
+				Usage:   provider.Usage{TotalTokens: 400},
+			},
+		},
+	}
+
+	var deltas []string
+	a := New(Config{
+		Provider:     mock,
+		Tools:        tools.NewRegistry(),
+		Context:      agentctx.NewManager(100000, 0.8),
+		Permission:   permission.NewChecker(config.PermissionYolo),
+		SystemPrompt: "You are helpful.",
+		OnTextDelta: func(delta string) {
+			deltas = append(deltas, delta)
+		},
+	})
+
+	result, err := a.RunStream("Run echo streamed")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result != "The output was: streamed" {
+		t.Errorf("expected final response, got: %q", result)
+	}
+
+	// Should have received deltas from both iterations
+	if len(deltas) != 2 {
+		t.Errorf("expected 2 deltas (one per iteration), got %d: %v", len(deltas), deltas)
+	}
+
+	if mock.callIndex != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", mock.callIndex)
+	}
+}
+
+// TestRunStreamNoDeltaCallback verifies RunStream works without OnTextDelta set.
+func TestRunStreamNoDeltaCallback(t *testing.T) {
+	mock := &mockProvider{
+		responses: []provider.Response{
+			{Content: "No callback here.", Usage: provider.Usage{TotalTokens: 50}},
+		},
+	}
+
+	a := New(Config{
+		Provider:     mock,
+		Tools:        tools.NewRegistry(),
+		Context:      agentctx.NewManager(100000, 0.8),
+		Permission:   permission.NewChecker(config.PermissionYolo),
+		SystemPrompt: "You are helpful.",
+		// OnTextDelta intentionally nil
+	})
+
+	result, err := a.RunStream("Hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result != "No callback here." {
+		t.Errorf("expected response, got: %q", result)
+	}
+}
+
+// TestRunStreamTokenTracking verifies token counts are updated from stream events.
+func TestRunStreamTokenTracking(t *testing.T) {
+	mock := &mockProvider{
+		responses: []provider.Response{
+			{Content: "Response", Usage: provider.Usage{TotalTokens: 2500}},
+		},
+	}
+
+	a := New(Config{
+		Provider:     mock,
+		Tools:        tools.NewRegistry(),
+		Context:      agentctx.NewManager(100000, 0.8),
+		Permission:   permission.NewChecker(config.PermissionYolo),
+		SystemPrompt: "You are helpful.",
+	})
+
+	a.RunStream("Hello")
+
+	if a.TotalTokens() != 2500 {
+		t.Errorf("expected 2500 tokens, got %d", a.TotalTokens())
 	}
 }

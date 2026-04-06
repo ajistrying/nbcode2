@@ -91,6 +91,11 @@ func main() {
 				})
 			}
 		},
+		OnTextDelta: func(delta string) {
+			if tuiProgram != nil {
+				tuiProgram.Send(tui.TextDeltaMsg(delta))
+			}
+		},
 	}
 
 	a := agent.New(agentCfg)
