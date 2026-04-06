@@ -10,7 +10,7 @@ import (
 func TestParse(t *testing.T) {
 	dir := t.TempDir()
 	skillDir := filepath.Join(dir, "test-skill")
-	os.MkdirAll(skillDir, 0o755)
+	_ = os.MkdirAll(skillDir, 0o755)
 
 	content := `---
 name: test-skill
@@ -28,7 +28,7 @@ disable-model-invocation: "true"
 Do something with $0.
 `
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	os.WriteFile(skillPath, []byte(content), 0o644)
+	_ = os.WriteFile(skillPath, []byte(content), 0o644)
 
 	skill, err := Parse(skillPath)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestParseNoFrontmatter(t *testing.T) {
 	dir := t.TempDir()
 	content := "# Just markdown\n\nNo frontmatter here."
 	skillPath := filepath.Join(dir, "SKILL.md")
-	os.WriteFile(skillPath, []byte(content), 0o644)
+	_ = os.WriteFile(skillPath, []byte(content), 0o644)
 
 	skill, err := Parse(skillPath)
 	if err != nil {
