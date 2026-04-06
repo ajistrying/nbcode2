@@ -16,6 +16,7 @@ import (
 	"github.com/ajistrying/nbcode2/internal/agent"
 	"github.com/ajistrying/nbcode2/internal/git"
 	"github.com/ajistrying/nbcode2/internal/provider"
+	"github.com/ajistrying/nbcode2/internal/skills"
 )
 
 // ─── Theme ──────────────────────────────────────────────────────────────────
@@ -115,6 +116,9 @@ type Model struct {
 	spinner  spinner.Model
 	renderer *glamour.TermRenderer
 
+	skillRegistry *skills.Registry
+	skillExecutor *skills.Executor
+
 	messages    []chatMessage
 	status      string
 	gitInfo     git.Info
@@ -139,7 +143,7 @@ type chatMessage struct {
 }
 
 // New creates the TUI model.
-func New(a *agent.Agent, p provider.Provider, workDir string) Model {
+func New(a *agent.Agent, p provider.Provider, workDir string, sr *skills.Registry, se *skills.Executor) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -153,12 +157,14 @@ func New(a *agent.Agent, p provider.Provider, workDir string) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(theme.accent)
 
 	return Model{
-		agent:    a,
-		provider: p,
-		textarea: ta,
-		spinner:  sp,
-		gitInfo:  git.GetInfo(workDir),
-		messages: make([]chatMessage, 0),
+		agent:         a,
+		provider:      p,
+		textarea:      ta,
+		spinner:       sp,
+		gitInfo:       git.GetInfo(workDir),
+		skillRegistry: sr,
+		skillExecutor: se,
+		messages:      make([]chatMessage, 0),
 	}
 }
 
@@ -243,8 +249,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			if input == "/quit" || input == "/exit" {
-				return m, tea.Quit
+			// Route slash commands
+			if strings.HasPrefix(input, "/") {
+				return m.handleSlashCommand(input)
 			}
 
 			m.textarea.Reset()
@@ -555,6 +562,114 @@ func (m Model) countWrappedLines(text string) int {
 		}
 	}
 	return total
+}
+
+// ─── Slash Commands ─────────────────────────────────────────────────────────
+
+func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
+	parts := strings.SplitN(input[1:], " ", 2)
+	name := parts[0]
+	args := ""
+	if len(parts) > 1 {
+		args = parts[1]
+	}
+
+	switch name {
+	case "quit", "exit":
+		return m, tea.Quit
+
+	case "help":
+		helpText := "Built-in commands:\n  /quit, /exit — exit nbcode\n  /skills     — list available skills\n  /help       — show this help\n"
+		if m.skillRegistry != nil && m.skillRegistry.Count() > 0 {
+			helpText += "\n" + skills.BuildUserCommandList(m.skillRegistry.UserInvocable())
+		}
+		m.messages = append(m.messages, chatMessage{role: "system", content: helpText})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+
+	case "skills":
+		if m.skillRegistry == nil || m.skillRegistry.Count() == 0 {
+			m.messages = append(m.messages, chatMessage{role: "system", content: "No skills discovered."})
+		} else {
+			m.messages = append(m.messages, chatMessage{
+				role:    "system",
+				content: skills.BuildUserCommandList(m.skillRegistry.UserInvocable()),
+			})
+		}
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+	}
+
+	// Skill lookup
+	if m.skillRegistry == nil {
+		m.messages = append(m.messages, chatMessage{
+			role:    "system",
+			content: fmt.Sprintf("Unknown command: /%s", name),
+		})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+	}
+
+	skill, err := m.skillRegistry.Get(name)
+	if err != nil {
+		m.messages = append(m.messages, chatMessage{
+			role:    "system",
+			content: fmt.Sprintf("Unknown command: /%s", name),
+		})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+	}
+
+	if !skill.IsUserInvocable() {
+		m.messages = append(m.messages, chatMessage{
+			role:    "system",
+			content: fmt.Sprintf("Skill '%s' is not user-invocable.", name),
+		})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+	}
+
+	m.textarea.Reset()
+	m.textarea.SetHeight(1)
+	m.messages = append(m.messages, chatMessage{
+		role:    "user",
+		content: fmt.Sprintf("/%s %s", name, args),
+	})
+	m.loading = true
+	m.viewport.SetContent(m.renderMessages())
+	m.viewport.GotoBottom()
+
+	return m, m.executeSkill(skill, args)
+}
+
+func (m Model) executeSkill(skill *skills.Skill, args string) tea.Cmd {
+	return func() tea.Msg {
+		if m.skillExecutor == nil {
+			return agentResponseMsg{err: fmt.Errorf("skill executor not initialized")}
+		}
+
+		result, err := m.skillExecutor.Execute(skill, args)
+		if err != nil {
+			return agentResponseMsg{err: fmt.Errorf("skill '%s' failed: %w", skill.Name(), err)}
+		}
+
+		if skill.IsForked() {
+			// Forked: result is the complete output from the isolated agent
+			return agentResponseMsg{content: result}
+		}
+
+		// Inline: inject the skill body into the conversation and let the agent process it
+		response, err := m.agent.Run(result)
+		if err != nil {
+			return agentResponseMsg{err: err}
+		}
+		return agentResponseMsg{content: response}
+	}
 }
 
 // ─── Commands & Helpers ─────────────────────────────────────────────────────

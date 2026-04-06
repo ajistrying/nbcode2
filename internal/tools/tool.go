@@ -106,3 +106,20 @@ func (r *Registry) SubAgentDefinitions() []provider.ToolDefinition {
 	}
 	return defs
 }
+
+// SkillAgentDefinitions returns tool definitions for skill execution,
+// excluding both sub_agent and skill tools to prevent nesting.
+func (r *Registry) SkillAgentDefinitions() []provider.ToolDefinition {
+	defs := make([]provider.ToolDefinition, 0, len(r.tools))
+	for _, t := range r.tools {
+		if t.Name() == "sub_agent" || t.Name() == "skill" {
+			continue
+		}
+		defs = append(defs, provider.ToolDefinition{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  t.Parameters(),
+		})
+	}
+	return defs
+}
