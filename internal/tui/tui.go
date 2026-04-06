@@ -180,11 +180,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
 
+		case tea.KeyPgUp:
+			m.viewport.HalfViewUp()
+			return m, nil
+
+		case tea.KeyPgDown:
+			m.viewport.HalfViewDown()
+			return m, nil
+
+		case tea.KeyCtrlU:
+			m.viewport.HalfViewUp()
+			return m, nil
+
+		case tea.KeyCtrlD:
+			m.viewport.HalfViewDown()
+			return m, nil
+
+		case tea.KeyUp:
+			m.viewport.LineUp(1)
+			return m, nil
+
+		case tea.KeyDown:
+			m.viewport.LineDown(1)
+			return m, nil
+
 		case tea.KeyEnter:
-			// Alt+Enter inserts a newline — let textarea handle it
-			if msg.Alt {
+			// Alt+Enter or Shift+Enter inserts a newline
+			if msg.Alt || msg.String() == "\x1b[13;2u" {
 				m.textarea.InsertRune('\n')
-				lines := strings.Count(m.textarea.Value(), "\n") + 1
+				lines := m.countWrappedLines(m.textarea.Value())
 				if lines > 6 {
 					lines = 6
 				}
@@ -320,13 +344,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Auto-grow textarea based on content (1–6 lines)
+	// Auto-grow textarea based on content (explicit newlines + word wrap)
 	if !m.loading || m.confirming {
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		cmds = append(cmds, cmd)
 
-		lines := strings.Count(m.textarea.Value(), "\n") + 1
+		lines := m.countWrappedLines(m.textarea.Value())
 		if lines < 1 {
 			lines = 1
 		}
@@ -505,18 +529,39 @@ func (m Model) renderMessages() string {
 func (m Model) renderWelcome() string {
 	title := welcomeTitleStyle.Render("nbcode")
 	hints := welcomeMutedStyle.Render(
-		"enter send  •  alt+enter newline  •  ctrl+c quit",
+		"enter send  •  alt+enter newline  •  ↑↓ scroll  •  ctrl+c quit",
 	)
 
 	block := lipgloss.JoinVertical(lipgloss.Center, "", title, "", hints, "")
 	return lipgloss.Place(m.viewport.Width, m.viewport.Height, lipgloss.Center, lipgloss.Center, block)
 }
 
+// countWrappedLines returns the number of visual lines the text will occupy
+// in the textarea, accounting for both explicit newlines and word wrapping.
+func (m Model) countWrappedLines(text string) int {
+	if text == "" {
+		return 1
+	}
+	taWidth := m.textarea.Width()
+	if taWidth <= 0 {
+		taWidth = 1
+	}
+	total := 0
+	for _, line := range strings.Split(text, "\n") {
+		if len(line) == 0 {
+			total++
+		} else {
+			total += (len(line)-1)/taWidth + 1
+		}
+	}
+	return total
+}
+
 // ─── Commands & Helpers ─────────────────────────────────────────────────────
 
-// streamTick returns a command that fires a streamTickMsg after 50ms.
+// streamTick returns a command that fires a streamTickMsg after 100ms.
 func (m Model) streamTick() tea.Cmd {
-	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 		return streamTickMsg(t)
 	})
 }

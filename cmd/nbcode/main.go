@@ -136,7 +136,7 @@ func createProvider(cfg *config.Config) (provider.Provider, error) {
 		// Treat everything else as OpenAI-compatible
 		model := provCfg.DefaultModel
 		if model == "" {
-			model = "gpt-4o"
+			model = "gpt-5.4-mini-2026-03-17"
 		}
 		return provider.NewOpenAIProvider(provider.OpenAIConfig{
 			APIKey:  provCfg.APIKey,
