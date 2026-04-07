@@ -80,9 +80,9 @@ func TestList(t *testing.T) {
 		},
 	}
 
-	store.Save(s1)
+	_ = store.Save(s1)
 	time.Sleep(10 * time.Millisecond) // ensure different UpdatedAt
-	store.Save(s2)
+	_ = store.Save(s2)
 
 	metas, err := store.List()
 	if err != nil {
@@ -113,7 +113,7 @@ func TestLatest(t *testing.T) {
 		t.Errorf("expected empty latest, got %q", latest)
 	}
 
-	store.Save(&Session{
+	_ = store.Save(&Session{
 		ID:        "only-session",
 		CreatedAt: time.Now(),
 		Messages:  []provider.Message{},
@@ -133,7 +133,7 @@ func TestPreviewTruncation(t *testing.T) {
 		longMessage += "x"
 	}
 
-	store.Save(&Session{
+	_ = store.Save(&Session{
 		ID:        "long-preview",
 		CreatedAt: time.Now(),
 		Messages: []provider.Message{

@@ -174,6 +174,41 @@ func (p *AnthropicProvider) Chat(messages []Message, tools []ToolDefinition) (*R
 	return result, nil
 }
 
+// ChatStream wraps Chat() into a channel of stream events.
+// This is a stub — Anthropic native streaming (SSE) is not yet implemented.
+func (p *AnthropicProvider) ChatStream(messages []Message, tools []ToolDefinition) <-chan StreamEvent {
+	ch := make(chan StreamEvent)
+
+	go func() {
+		defer close(ch)
+
+		resp, err := p.Chat(messages, tools)
+		if err != nil {
+			ch <- StreamEvent{Type: EventError, Error: err}
+			return
+		}
+
+		// Emit text as a single delta
+		if resp.Content != "" {
+			ch <- StreamEvent{Type: EventTextDelta, Delta: resp.Content}
+		}
+
+		// Emit tool starts for each tool call
+		for _, tc := range resp.ToolCalls {
+			tc := tc
+			ch <- StreamEvent{Type: EventToolStart, ToolCall: &tc}
+		}
+
+		ch <- StreamEvent{
+			Type:      EventDone,
+			ToolCalls: resp.ToolCalls,
+			Usage:     &resp.Usage,
+		}
+	}()
+
+	return ch
+}
+
 // toAnthropicMessages converts our messages to Anthropic format.
 // Extracts the system message and converts tool call/result messages.
 func toAnthropicMessages(messages []Message) (string, []anthropicMessage) {
