@@ -39,7 +39,7 @@ func TestReadFileWithOffset(t *testing.T) {
 		lines[i] = strings.Repeat("x", 10)
 	}
 	path := filepath.Join(tmpDir, "big.txt")
-	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	_ = os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 
 	tool := &ReadFileTool{}
 	args, _ := json.Marshal(readFileArgs{Path: path, Offset: 10, Limit: 5})
@@ -116,7 +116,7 @@ func TestWriteFileCreatesDirectories(t *testing.T) {
 func TestEditFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "edit.txt")
-	os.WriteFile(path, []byte("foo bar baz"), 0644)
+	_ = os.WriteFile(path, []byte("foo bar baz"), 0644)
 
 	tool := &EditFileTool{}
 	args, _ := json.Marshal(editFileArgs{
@@ -157,7 +157,7 @@ func TestEditFileNotFound(t *testing.T) {
 func TestEditFileNoMatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "edit.txt")
-	os.WriteFile(path, []byte("hello world"), 0644)
+	_ = os.WriteFile(path, []byte("hello world"), 0644)
 
 	tool := &EditFileTool{}
 	args, _ := json.Marshal(editFileArgs{
@@ -178,7 +178,7 @@ func TestEditFileNoMatch(t *testing.T) {
 func TestEditFileMultipleMatches(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "edit.txt")
-	os.WriteFile(path, []byte("aaa bbb aaa"), 0644)
+	_ = os.WriteFile(path, []byte("aaa bbb aaa"), 0644)
 
 	tool := &EditFileTool{}
 	args, _ := json.Marshal(editFileArgs{
@@ -225,9 +225,9 @@ func TestListFiles(t *testing.T) {
 
 func TestListFilesWithPattern(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "b.go"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "c.txt"), []byte(""), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte(""), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "b.go"), []byte(""), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "c.txt"), []byte(""), 0644)
 
 	tool := &ListFilesTool{}
 	args, _ := json.Marshal(listFilesArgs{Path: tmpDir, Pattern: "*.go"})
@@ -249,8 +249,8 @@ func TestListFilesWithPattern(t *testing.T) {
 
 func TestSearch(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "code.go"), []byte("func main() {\n\tfmt.Println(\"hello\")\n}\n"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "other.txt"), []byte("no match here\n"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "code.go"), []byte("func main() {\n\tfmt.Println(\"hello\")\n}\n"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "other.txt"), []byte("no match here\n"), 0644)
 
 	tool := &SearchTool{}
 	args, _ := json.Marshal(searchArgs{Pattern: "Println", Path: tmpDir})
@@ -270,7 +270,7 @@ func TestSearch(t *testing.T) {
 
 func TestSearchNoMatch(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("nothing relevant\n"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("nothing relevant\n"), 0644)
 
 	tool := &SearchTool{}
 	args, _ := json.Marshal(searchArgs{Pattern: "nonexistent_pattern_xyz", Path: tmpDir})

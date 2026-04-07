@@ -133,7 +133,7 @@ func TestPreviewTruncation(t *testing.T) {
 		longMessage += "x"
 	}
 
-	store.Save(&Session{
+	_ = store.Save(&Session{
 		ID:        "long-preview",
 		CreatedAt: time.Now(),
 		Messages: []provider.Message{
