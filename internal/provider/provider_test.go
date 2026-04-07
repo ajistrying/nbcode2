@@ -284,7 +284,7 @@ func TestAnthropicChatStreamStubIntegration(t *testing.T) {
 			"usage": {"input_tokens": 10, "output_tokens": 5},
 			"stop_reason": "end_turn"
 		}`
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	defer server.Close()
@@ -338,7 +338,7 @@ func TestAnthropicChatStreamStubWithToolCalls(t *testing.T) {
 			"usage": {"input_tokens": 20, "output_tokens": 15},
 			"stop_reason": "tool_use"
 		}`
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	defer server.Close()

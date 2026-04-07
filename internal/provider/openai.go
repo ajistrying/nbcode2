@@ -230,7 +230,7 @@ func toOpenAITools(tools []ToolDefinition) []openai.Tool {
 	for _, t := range tools {
 		params := make(map[string]any)
 		if len(t.Parameters) > 0 {
-			json.Unmarshal(t.Parameters, &params)
+			_ = json.Unmarshal(t.Parameters, &params)
 		}
 		out = append(out, openai.Tool{
 			Type: openai.ToolTypeFunction,

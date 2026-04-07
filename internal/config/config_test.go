@@ -27,7 +27,7 @@ func TestLoadFromYAML(t *testing.T) {
 	// Create a temp config file
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".nbcode")
-	os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(configDir, 0755)
 
 	configContent := `
 providers:
@@ -45,7 +45,7 @@ summarization:
   threshold: 0.9
 `
 	configPath := filepath.Join(configDir, "config.yaml")
-	os.WriteFile(configPath, []byte(configContent), 0644)
+	_ = os.WriteFile(configPath, []byte(configContent), 0644)
 
 	// Override HOME to use our temp dir
 	origHome := os.Getenv("HOME")
@@ -134,7 +134,7 @@ func TestEnvOverridesConfigFile(t *testing.T) {
 	// Create config file with one key, env has a different one
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".nbcode")
-	os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(configDir, 0755)
 
 	configContent := `
 providers:
@@ -142,7 +142,7 @@ providers:
     api_key: config-file-key
     default_model: claude-haiku
 `
-	os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
+	_ = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644)
 
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)

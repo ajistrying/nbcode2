@@ -14,7 +14,7 @@ func TestReadFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	content := "line one\nline two\nline three\nline four\nline five\n"
 	path := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(path, []byte(content), 0644)
+	_ = os.WriteFile(path, []byte(content), 0644)
 
 	tool := &ReadFileTool{}
 	args, _ := json.Marshal(readFileArgs{Path: path})
@@ -200,9 +200,9 @@ func TestEditFileMultipleMatches(t *testing.T) {
 
 func TestListFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "b.go"), []byte(""), 0644)
-	os.MkdirAll(filepath.Join(tmpDir, "subdir"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte(""), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "b.go"), []byte(""), 0644)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "subdir"), 0755)
 
 	tool := &ListFilesTool{}
 	args, _ := json.Marshal(listFilesArgs{Path: tmpDir})

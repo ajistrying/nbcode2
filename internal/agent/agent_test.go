@@ -291,7 +291,7 @@ func TestTokenTracking(t *testing.T) {
 		SystemPrompt: "You are helpful.",
 	})
 
-	a.Run("Hello")
+	_, _ = a.Run("Hello")
 
 	if a.TotalTokens() != 1500 {
 		t.Errorf("expected 1500 tokens, got %d", a.TotalTokens())
@@ -324,7 +324,7 @@ func TestStatusCallbacks(t *testing.T) {
 		},
 	})
 
-	a.Run("Do something")
+	_, _ = a.Run("Do something")
 
 	// Should have received status updates: "Thinking...", "Running bash...", "Thinking...", ""
 	foundThinking := false
@@ -481,7 +481,7 @@ func TestRunStreamTokenTracking(t *testing.T) {
 		SystemPrompt: "You are helpful.",
 	})
 
-	a.RunStream("Hello")
+	_, _ = a.RunStream("Hello")
 
 	if a.TotalTokens() != 2500 {
 		t.Errorf("expected 2500 tokens, got %d", a.TotalTokens())

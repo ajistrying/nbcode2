@@ -181,27 +181,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case tea.KeyPgUp:
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 
 		case tea.KeyPgDown:
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 
 		case tea.KeyCtrlU:
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 
 		case tea.KeyCtrlD:
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 
 		case tea.KeyUp:
-			m.viewport.LineUp(1)
+			m.viewport.ScrollUp(1)
 			return m, nil
 
 		case tea.KeyDown:
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 			return m, nil
 
 		case tea.KeyEnter:
