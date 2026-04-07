@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +15,7 @@ import (
 	"github.com/ajistrying/nbcode2/internal/permission"
 	"github.com/ajistrying/nbcode2/internal/prompt"
 	"github.com/ajistrying/nbcode2/internal/provider"
+	"github.com/ajistrying/nbcode2/internal/skills"
 	"github.com/ajistrying/nbcode2/internal/tools"
 	"github.com/ajistrying/nbcode2/internal/tui"
 )
@@ -57,10 +59,50 @@ func main() {
 	permChecker := permission.NewChecker(cfg.Permissions)
 	systemPrompt := prompt.Build(workDir)
 
+	// Discover and load skills
+	skillRegistry, err := skills.NewRegistry(workDir)
+	if err != nil {
+		log.Printf("Warning: skill discovery failed: %v", err)
+	}
+
+	// Append skill catalog to system prompt
+	if skillRegistry != nil && skillRegistry.Count() > 0 {
+		catalog := skills.BuildCatalog(skillRegistry.All(), skills.CatalogConfig{
+			MaxChars: llmProvider.MaxContextTokens() / 100,
+		})
+		if catalog != "" {
+			systemPrompt += "\n\n" + catalog
+		}
+	}
+
 	// Confirmation channel for TUI ↔ agent communication
 	confirmChan := make(chan bool, 1)
 
 	var tuiProgram *tea.Program
+
+	onConfirm := func(toolName string, args json.RawMessage) bool {
+		tuiProgram.Send(tui.ConfirmRequestMsg{
+			ToolName: toolName,
+			Args:     args,
+			Respond:  confirmChan,
+		})
+		return <-confirmChan
+	}
+
+	onStatus := func(status string) {
+		if tuiProgram != nil {
+			tuiProgram.Send(tui.StatusUpdateMsg(status))
+		}
+	}
+
+	onToolCall := func(toolName string, args json.RawMessage) {
+		if tuiProgram != nil {
+			tuiProgram.Send(tui.ToolCallMsg{
+				ToolName: toolName,
+				Args:     args,
+			})
+		}
+	}
 
 	agentCfg := agent.Config{
 		Provider:     llmProvider,
@@ -68,29 +110,9 @@ func main() {
 		Context:      ctxManager,
 		Permission:   permChecker,
 		SystemPrompt: systemPrompt,
-		OnConfirm: func(toolName string, args json.RawMessage) bool {
-			// Send confirm request to TUI
-			tuiProgram.Send(tui.ConfirmRequestMsg{
-				ToolName: toolName,
-				Args:     args,
-				Respond:  confirmChan,
-			})
-			// Block until user responds
-			return <-confirmChan
-		},
-		OnStatus: func(status string) {
-			if tuiProgram != nil {
-				tuiProgram.Send(tui.StatusUpdateMsg(status))
-			}
-		},
-		OnToolCall: func(toolName string, args json.RawMessage) {
-			if tuiProgram != nil {
-				tuiProgram.Send(tui.ToolCallMsg{
-					ToolName: toolName,
-					Args:     args,
-				})
-			}
-		},
+		OnConfirm:  onConfirm,
+		OnStatus:   onStatus,
+		OnToolCall: onToolCall,
 		OnTextDelta: func(delta string) {
 			if tuiProgram != nil {
 				tuiProgram.Send(tui.TextDeltaMsg(delta))
@@ -99,7 +121,27 @@ func main() {
 	}
 
 	a := agent.New(agentCfg)
-	model := tui.New(a, llmProvider, workDir)
+
+	// Create skill executor (shares tools, permissions, and callbacks with agent)
+	systemMsg := provider.Message{Role: provider.RoleSystem, Content: systemPrompt}
+	var skillExecutor *skills.Executor
+	if skillRegistry != nil {
+		skillExecutor = skills.NewExecutor(skills.ExecutorConfig{
+			Provider:   llmProvider,
+			Tools:      registry,
+			Permission: permChecker,
+			OnConfirm:  onConfirm,
+			OnStatus:   onStatus,
+			OnToolCall: onToolCall,
+			SystemMsg:  systemMsg,
+		})
+
+		// Register the skill tool so the LLM can invoke skills
+		skillTool := skills.NewSkillTool(skillRegistry, skillExecutor)
+		registry.Register(skillTool)
+	}
+
+	model := tui.New(a, llmProvider, workDir, skillRegistry, skillExecutor)
 	tuiProgram = tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := tuiProgram.Run(); err != nil {
